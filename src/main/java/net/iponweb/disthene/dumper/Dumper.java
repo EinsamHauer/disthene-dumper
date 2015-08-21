@@ -4,6 +4,8 @@ import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
 import com.datastax.driver.core.policies.WhiteListPolicy;
+import com.google.common.base.Function;
+import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.*;
 import org.apache.log4j.Logger;
 import org.elasticsearch.action.search.SearchResponse;
@@ -74,7 +76,7 @@ public class Dumper {
         client.close();
     }
 
-    private void dumpTenant(File folder, String tenant) throws IOException {
+    private void dumpTenant(File folder, final String tenant) throws IOException, ExecutionException, InterruptedException {
         logger.info("Dumping tenant: " + tenant);
 
         FileOutputStream fos = new FileOutputStream(folder.getAbsolutePath() + "/" + tenant + ".txt.gz");
@@ -86,13 +88,52 @@ public class Dumper {
 
         logger.info("Got " + paths.size() + " paths");
 
-        PreparedStatement longRollupStatement = session.prepare(
+        final PreparedStatement longRollupStatement = session.prepare(
                 "select time, data from metric.metric where tenant = '" + tenant + "' and path = ? and rollup = 900 and period = 69120 and " +
                         "time >= " + parameters.getStartTime() + " and time <= " + parameters.getEndTime() +
                         " order by time asc"
         );
 
         ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(parameters.getThreads()));
+
+        List<ListenableFuture<String>> futures = Lists.newArrayListWithExpectedSize(paths.size());;
+        for (final String path : paths) {
+            Function<ResultSet, String> serializeFunction =
+                    new Function<ResultSet, String>() {
+                        public String apply(ResultSet resultSet) {
+                            StringBuffer sb = new StringBuffer();
+                            for(Row row : resultSet) {
+                                sb.append(path).append(" ").append(row.getLong("time")).append(" ");
+                                sb.append(path.startsWith("sum") ? ListUtils.sum(row.getList("data", Double.class)) : ListUtils.average(row.getList("data", Double.class))).append(" ");
+                                sb.append(tenant).append("\n");
+
+                            }
+                            return sb.toString();
+                        }
+                    };
+
+            futures.add(
+                    Futures.transform(
+                            session.executeAsync(longRollupStatement.bind(path)),
+                            serializeFunction,
+                            executor
+                    )
+            );
+        }
+
+        futures = Futures.inCompletionOrder(futures);
+
+        int counter = 0;
+        for (ListenableFuture<String> future : futures) {
+            pwMetrics.print(future.get());
+            counter++;
+            if (counter % 100000 == 0) {
+                logger.info("Processed: " + counter * 100 / paths.size() + "%");
+                pwMetrics.flush();
+            }
+        }
+
+/*
 
         final AtomicInteger counter = new AtomicInteger(0);
 
@@ -124,6 +165,7 @@ public class Dumper {
         } catch (InterruptedException e) {
             logger.error("Failed: ", e);
         }
+*/
 
         pwMetrics.flush();
         pwMetrics.close();
@@ -215,6 +257,7 @@ public class Dumper {
         session = cluster.connect();
     }
 
+/*
     private static class Metric {
         public String path;
         public Long time;
@@ -261,4 +304,5 @@ public class Dumper {
             return metrics;
         }
     }
+*/
 }
