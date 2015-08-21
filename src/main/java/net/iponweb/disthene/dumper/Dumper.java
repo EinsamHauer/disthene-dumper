@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.GZIPOutputStream;
 
@@ -92,6 +93,7 @@ public class Dumper {
         );
 
         ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(parameters.getThreads()));
+
         final AtomicInteger counter = new AtomicInteger(0);
 
         for (String path : paths) {
@@ -116,6 +118,12 @@ public class Dumper {
             });
         }
 
+        executor.shutdown();
+        try {
+            executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            logger.error("Failed: ", e);
+        }
 
         pwMetrics.flush();
         pwMetrics.close();
@@ -243,7 +251,7 @@ public class Dumper {
         public List<Metric> call() throws Exception {
             List<Metric> metrics = new ArrayList<>();
             Statement statement = preparedStatement.bind(path);
-            statement.setFetchSize(1000);
+//            statement.setFetchSize(1000);
             ResultSet resultSet = session.execute(statement);
 
             for(Row row : resultSet) {
