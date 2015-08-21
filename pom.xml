@@ -60,7 +60,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>net.iponweb.disthene.reader.DistheneReader</mainClass>
+                            <mainClass>net.iponweb.disthene.dumper.DistheneDumper</mainClass>
                         </manifest>
                     </archive>
                     <descriptorRefs>
