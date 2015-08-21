@@ -106,7 +106,7 @@ public class Dumper {
                     }
                     int cc = counter.addAndGet(1);
                     if (cc % 100000 == 0) {
-                        logger.info("Processing: " + cc * 100 / paths.size());
+                        logger.info("Processed: " + cc * 100 / paths.size() + "%");
                         pwMetrics.flush();
                     }
                 }
