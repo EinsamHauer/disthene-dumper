@@ -65,9 +65,7 @@ public class Dumper {
         List<String> tenants = getTenants();
 
         for (String tenant : tenants) {
-            if (!tenant.equals("tokyo")) {
-                dumpTenant(dayFolder, tenant);
-            }
+            dumpTenant(dayFolder, tenant);
         }
 
         session.close();
@@ -105,8 +103,8 @@ public class Dumper {
                         pwMetrics.println(metric);
                     }
                     int cc = counter.addAndGet(1);
-                    if (cc % 10000 == 0) {
-                        System.out.print("Processing: " + cc * 100 / paths.size() + "%\r");
+                    if (cc % 100000 == 0) {
+                        logger.info("Processing: " + cc * 100 / paths.size());
                         pwMetrics.flush();
                     }
                 }
