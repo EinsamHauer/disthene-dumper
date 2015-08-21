@@ -96,6 +96,7 @@ public class Dumper {
 
         ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(parameters.getThreads()));
 
+/*
         List<ListenableFuture<String>> futures = Lists.newArrayListWithExpectedSize(paths.size());;
         for (final String path : paths) {
             Function<ResultSet, String> serializeFunction =
@@ -132,8 +133,8 @@ public class Dumper {
                 pwMetrics.flush();
             }
         }
+*/
 
-/*
 
         final AtomicInteger counter = new AtomicInteger(0);
 
@@ -165,7 +166,6 @@ public class Dumper {
         } catch (InterruptedException e) {
             logger.error("Failed: ", e);
         }
-*/
 
         pwMetrics.flush();
         pwMetrics.close();
@@ -257,7 +257,6 @@ public class Dumper {
         session = cluster.connect();
     }
 
-/*
     private static class Metric {
         public String path;
         public Long time;
@@ -304,5 +303,4 @@ public class Dumper {
             return metrics;
         }
     }
-*/
 }
