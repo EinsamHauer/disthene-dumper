@@ -102,7 +102,7 @@ public class Dumper {
         );
 
         ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(parameters.getThreads()));
-
+/*
         List<ListenableFuture<Void>> futures = Lists.newArrayListWithExpectedSize(paths.size());;
 
         final AtomicInteger counter = new AtomicInteger(0);
@@ -144,7 +144,7 @@ public class Dumper {
             future.get();
             totalCount ++;
         }
-        logger.info("Processed " + totalCount + " paths");
+        logger.info("Processed " + totalCount + " paths");*/
 
 /*
         for (int i = 0; i < paths.size(); i += 100000) {
@@ -215,7 +215,7 @@ public class Dumper {
 */
 
 
-/*        final AtomicInteger counter = new AtomicInteger(0);
+        final AtomicInteger counter = new AtomicInteger(0);
 
         for (String path : paths) {
             ListenableFuture<List<Metric>> future = executor.submit(new SinglePathCallable(session, longRollupStatement, path, tenant));
@@ -244,7 +244,7 @@ public class Dumper {
             executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             logger.error("Failed: ", e);
-        }*/
+        }
 
         pwMetrics.flush();
         pwMetrics.close();
@@ -258,7 +258,7 @@ public class Dumper {
 
         SearchResponse response = client.prepareSearch("cyanite_paths")
                 .setScroll(new TimeValue(120000))
-                .setSize(50000)
+                .setSize(100000)
                 .setQuery(QueryBuilders.filteredQuery(QueryBuilders.filteredQuery(
                         QueryBuilders.regexpQuery("path", ".*"),
                         FilterBuilders.termFilter("tenant", tenant)), FilterBuilders.termFilter("leaf", true)))
@@ -283,23 +283,18 @@ public class Dumper {
         List<String> result = new ArrayList<>();
 
         SearchResponse response = client.prepareSearch(INDEX_NAME)
-                .setScroll(new TimeValue(120000))
                 .setSearchType(SearchType.COUNT)
-                .addAggregation(AggregationBuilders.terms("agg").field("tenant"))
-                .setSize(50000)
+                .addAggregation(AggregationBuilders.terms("agg").field("tenant").size(0))
+                .setSize(10000)
                 .execute().get();
 
-        while (response.getHits().getHits().length > 0) {
-            Collection<Terms.Bucket> buckets = ((Terms) response.getAggregations().get("agg")).getBuckets();
+        logger.info(response.getHits().getTotalHits());
+        Collection<Terms.Bucket> buckets = ((Terms) response.getAggregations().get("agg")).getBuckets();
 
-            for(Terms.Bucket bucket : buckets) {
-                result.add(bucket.getKey());
-            }
-
-            response = client.prepareSearchScroll(response.getScrollId())
-                    .setScroll(new TimeValue(120000))
-                    .execute().actionGet();
+        for(Terms.Bucket bucket : buckets) {
+            result.add(bucket.getKey());
         }
+
 
         return result;
     }
