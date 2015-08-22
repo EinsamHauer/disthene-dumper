@@ -4,6 +4,7 @@ import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
 import com.datastax.driver.core.policies.WhiteListPolicy;
+import com.datastax.driver.core.utils.MoreFutures;
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.*;
@@ -67,8 +68,14 @@ public class Dumper {
 
         List<String> tenants = getTenants();
 
+        logger.info("Tenants:");
         for (String tenant : tenants) {
-            dumpTenant(dayFolder, tenant);
+            logger.info("\t" + tenant);
+        }
+        for (String tenant : tenants) {
+            if (!tenant.equals("bidswitch")) {
+                dumpTenant(dayFolder, tenant);
+            }
         }
 
         session.close();
@@ -95,6 +102,78 @@ public class Dumper {
         );
 
         ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(parameters.getThreads()));
+
+        List<ListenableFuture<Void>> futures = Lists.newArrayListWithExpectedSize(paths.size());;
+
+        final AtomicInteger counter = new AtomicInteger(0);
+        for (final String path : paths) {
+            Function<ResultSet, Void> function = new Function<ResultSet, Void>() {
+                @Override
+                public Void apply(ResultSet result) {
+                    StringBuilder sb = new StringBuilder();
+                    for(Row row : result) {
+                        sb.append(path).append(" ").append(row.getLong("time")).append(" ");
+                        sb.append(path.startsWith("sum") ? ListUtils.sum(row.getList("data", Double.class)) : ListUtils.average(row.getList("data", Double.class))).append(" ");
+                        sb.append(tenant).append("\n");
+
+                    }
+
+                    pwMetrics.print(sb.toString());
+                    int cc = counter.addAndGet(1);
+                    if (cc % 100000 == 0) {
+                        logger.info("Processed: " + cc * 100 / paths.size() + "%");
+                        pwMetrics.flush();
+                    }
+
+                    return null;
+                }
+            };
+
+            futures.add(
+                    Futures.transform(
+                            session.executeAsync(longRollupStatement.bind(path)),
+                            function,
+                            executor
+                    ));
+        }
+
+        futures = Futures.inCompletionOrder(futures);
+
+        int totalCount = 0;
+        for (ListenableFuture<Void> future : futures) {
+            future.get();
+            totalCount ++;
+        }
+        logger.info("Processed " + totalCount + " paths");
+
+/*
+        for (int i = 0; i < paths.size(); i += 100000) {
+            List<ListenableFuture<String>> futures = Lists.newArrayListWithExpectedSize(100000);
+
+            for (int j = i; j < i + 100000; j++) {
+                Function<ResultSet, String> serializeFunction =
+                        new Function<ResultSet, String>() {
+                            public String apply(ResultSet resultSet) {
+                                StringBuffer sb = new StringBuffer();
+                                for(Row row : resultSet) {
+                                    sb.append(path).append(" ").append(row.getLong("time")).append(" ");
+                                    sb.append(path.startsWith("sum") ? ListUtils.sum(row.getList("data", Double.class)) : ListUtils.average(row.getList("data", Double.class))).append(" ");
+                                    sb.append(tenant).append("\n");
+
+                                }
+                                return sb.toString();
+                            }
+                        };
+
+                futures.add(
+                        Futures.transform(
+                                session.executeAsync(longRollupStatement.bind(path)),
+                                serializeFunction,
+                                executor
+                        )
+            }
+        }
+*/
 
 /*
         List<ListenableFuture<String>> futures = Lists.newArrayListWithExpectedSize(paths.size());;
@@ -136,7 +215,7 @@ public class Dumper {
 */
 
 
-        final AtomicInteger counter = new AtomicInteger(0);
+/*        final AtomicInteger counter = new AtomicInteger(0);
 
         for (String path : paths) {
             ListenableFuture<List<Metric>> future = executor.submit(new SinglePathCallable(session, longRollupStatement, path, tenant));
@@ -165,7 +244,7 @@ public class Dumper {
             executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             logger.error("Failed: ", e);
-        }
+        }*/
 
         pwMetrics.flush();
         pwMetrics.close();
@@ -205,7 +284,9 @@ public class Dumper {
 
         SearchResponse response = client.prepareSearch(INDEX_NAME)
                 .setSearchType(SearchType.COUNT)
-                .addAggregation(AggregationBuilders.terms("agg").field("tenant")).execute().get();
+                .addAggregation(AggregationBuilders.terms("agg").field("tenant"))
+                .setSize(500)
+                .execute().get();
 
         Collection<Terms.Bucket> buckets = ((Terms) response.getAggregations().get("agg")).getBuckets();
 
@@ -231,8 +312,8 @@ public class Dumper {
         socketOptions.setReadTimeoutMillis(1000000);
 
         PoolingOptions poolingOptions = new PoolingOptions();
-        poolingOptions.setMaxConnectionsPerHost(HostDistance.LOCAL, 8192);
-        poolingOptions.setMaxConnectionsPerHost(HostDistance.REMOTE, 8192);
+        poolingOptions.setMaxConnectionsPerHost(HostDistance.LOCAL, 32);
+        poolingOptions.setMaxConnectionsPerHost(HostDistance.REMOTE, 32);
         poolingOptions.setMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE, 128);
         poolingOptions.setMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL, 128);
 
