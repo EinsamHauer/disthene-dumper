@@ -288,7 +288,6 @@ public class Dumper {
                 .setSize(10000)
                 .execute().get();
 
-        logger.info(response.getHits().getTotalHits());
         Collection<Terms.Bucket> buckets = ((Terms) response.getAggregations().get("agg")).getBuckets();
 
         for(Terms.Bucket bucket : buckets) {
