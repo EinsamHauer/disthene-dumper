@@ -283,15 +283,22 @@ public class Dumper {
         List<String> result = new ArrayList<>();
 
         SearchResponse response = client.prepareSearch(INDEX_NAME)
+                .setScroll(new TimeValue(120000))
                 .setSearchType(SearchType.COUNT)
                 .addAggregation(AggregationBuilders.terms("agg").field("tenant"))
-                .setSize(500)
+                .setSize(50000)
                 .execute().get();
 
-        Collection<Terms.Bucket> buckets = ((Terms) response.getAggregations().get("agg")).getBuckets();
+        while (response.getHits().getHits().length > 0) {
+            Collection<Terms.Bucket> buckets = ((Terms) response.getAggregations().get("agg")).getBuckets();
 
-        for(Terms.Bucket bucket : buckets) {
-            result.add(bucket.getKey());
+            for(Terms.Bucket bucket : buckets) {
+                result.add(bucket.getKey());
+            }
+
+            response = client.prepareSearchScroll(response.getScrollId())
+                    .setScroll(new TimeValue(120000))
+                    .execute().actionGet();
         }
 
         return result;
