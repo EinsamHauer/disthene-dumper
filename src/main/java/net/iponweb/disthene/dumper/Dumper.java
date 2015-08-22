@@ -73,9 +73,7 @@ public class Dumper {
             logger.info("\t" + tenant);
         }
         for (String tenant : tenants) {
-            if (!tenant.equals("bidswitch")) {
-                dumpTenant(dayFolder, tenant);
-            }
+            dumpTenant(dayFolder, tenant);
         }
 
         session.close();
