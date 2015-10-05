@@ -1,0 +1,9 @@
+#!/bin/bash
+
+if [ -f /etc/default/disthene-dumper ]; then
+    . /etc/default/disthene-dumper
+fi
+
+JAR="/usr/lib/disthene-dumper/disthene-dumper.jar"
+
+java $JAVA_OPTS -jar $JAR "$@"
