@@ -4,7 +4,7 @@
     <groupId>net.iponweb.disthene.dumper</groupId>
     <artifactId>disthene-dumper</artifactId>
     <packaging>jar</packaging>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
     <name>disthene-dumper</name>
     <url>http://maven.apache.org</url>
     <dependencies>
