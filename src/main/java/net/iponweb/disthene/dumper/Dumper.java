@@ -1,6 +1,7 @@
 package net.iponweb.disthene.dumper;
 
 import com.datastax.driver.core.*;
+import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.HostFilterPolicy;
 import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
@@ -213,15 +214,13 @@ public class Dumper {
             for (String host : parameters.getCassandraBlacklist()) {
                 blacklisted.add(InetAddress.getByName(host));
             }
-            builder.withLoadBalancingPolicy(new HostFilterPolicy(new TokenAwarePolicy(new RoundRobinPolicy()), host -> !blacklisted.contains(host.getAddress())));
+            builder.withLoadBalancingPolicy(new HostFilterPolicy(new TokenAwarePolicy(DCAwareRoundRobinPolicy.builder().build()), host -> !blacklisted.contains(host.getAddress())));
 
         } else {
-            builder.withLoadBalancingPolicy(new TokenAwarePolicy(new RoundRobinPolicy()));
+            builder.withLoadBalancingPolicy(new TokenAwarePolicy(DCAwareRoundRobinPolicy.builder().build()));
         }
 
-
-
-            builder.addContactPoint(parameters.getCassandraContactPoint());
+        builder.addContactPoint(parameters.getCassandraContactPoint());
 
         Cluster cluster = builder.build();
         Metadata metadata = cluster.getMetadata();

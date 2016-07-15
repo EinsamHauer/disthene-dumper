@@ -95,6 +95,20 @@ public class DistheneDumperParameters {
                 ", cassandraContactPoint='" + cassandraContactPoint + '\'' +
                 ", elasticSearchContactPoint='" + elasticSearchContactPoint + '\'' +
                 ", threads=" + threads +
+                ", cassandraBlacklist=" + cassandraBlacklist +
                 '}';
     }
+
+    /*    @Override
+    public String toString() {
+        return "DistheneDumperParameters{" +
+                "outputLocation='" + outputLocation + '\'' +
+                ", startTime=" + startTime +
+                ", endTime=" + endTime +
+                ", rollups=" + rollups +
+                ", cassandraContactPoint='" + cassandraContactPoint + '\'' +
+                ", elasticSearchContactPoint='" + elasticSearchContactPoint + '\'' +
+                ", threads=" + threads +
+                '}';
+    }*/
 }
