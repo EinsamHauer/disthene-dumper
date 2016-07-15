@@ -3,7 +3,6 @@ package net.iponweb.disthene.dumper;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
 import com.datastax.driver.core.policies.HostFilterPolicy;
-import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
 import com.google.common.util.concurrent.*;
 import org.apache.log4j.Logger;
@@ -210,11 +209,11 @@ public class Dumper {
                 .withPort(9042);
 
         if (parameters.getCassandraBlacklist().size() > 0) {
-            Set<InetAddress> blacklisted = new HashSet<>();
+            final Set<String> blacklisted = new HashSet<>();
             for (String host : parameters.getCassandraBlacklist()) {
-                blacklisted.add(InetAddress.getByName(host));
+                blacklisted.add(InetAddress.getByName(host).getHostAddress());
             }
-            builder.withLoadBalancingPolicy(new HostFilterPolicy(new TokenAwarePolicy(DCAwareRoundRobinPolicy.builder().build()), host -> !blacklisted.contains(host.getAddress())));
+            builder.withLoadBalancingPolicy(new HostFilterPolicy(new TokenAwarePolicy(DCAwareRoundRobinPolicy.builder().build()), host -> !blacklisted.contains(host.getAddress().getHostAddress())));
 
         } else {
             builder.withLoadBalancingPolicy(new TokenAwarePolicy(DCAwareRoundRobinPolicy.builder().build()));
