@@ -1,7 +1,9 @@
 package net.iponweb.disthene.dumper;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * @author Andrei Ivanov
@@ -12,10 +14,11 @@ public class DistheneDumperParameters {
     private String outputLocation;
     private long startTime;
     private long endTime;
-    private List<Rollup> rollups = new ArrayList<Rollup>();
+    private List<Rollup> rollups = new ArrayList<>();
     private String cassandraContactPoint;
     private String elasticSearchContactPoint;
     private int threads;
+    private Set<String> cassandraBlacklist = new HashSet<>();
 
 
     public String getOutputLocation() {
@@ -72,6 +75,14 @@ public class DistheneDumperParameters {
 
     public void setThreads(int threads) {
         this.threads = threads;
+    }
+
+    public Set<String> getCassandraBlacklist() {
+        return cassandraBlacklist;
+    }
+
+    public void addToCassandraBlacklist(String node) {
+        cassandraBlacklist.add(node);
     }
 
     @Override

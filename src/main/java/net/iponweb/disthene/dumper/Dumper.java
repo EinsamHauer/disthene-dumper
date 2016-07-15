@@ -1,12 +1,9 @@
 package net.iponweb.disthene.dumper;
 
 import com.datastax.driver.core.*;
-import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
+import com.datastax.driver.core.policies.HostFilterPolicy;
+import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
-import com.datastax.driver.core.policies.WhiteListPolicy;
-import com.datastax.driver.core.utils.MoreFutures;
-import com.google.common.base.Function;
-import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.*;
 import org.apache.log4j.Logger;
 import org.elasticsearch.action.search.SearchResponse;
@@ -25,12 +22,13 @@ import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.format.DateTimeFormat;
 
-import java.io.*;
-import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.List;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -189,7 +187,7 @@ public class Dumper {
         client.addTransportAddress(new InetSocketTransportAddress(parameters.getElasticSearchContactPoint(), 9300));
     }
 
-    private void connectToCassandra() {
+    private void connectToCassandra() throws UnknownHostException {
         SocketOptions socketOptions = new SocketOptions();
         socketOptions.setReceiveBufferSize(8388608);
         socketOptions.setSendBufferSize(1048576);
@@ -200,19 +198,30 @@ public class Dumper {
         PoolingOptions poolingOptions = new PoolingOptions();
         poolingOptions.setMaxConnectionsPerHost(HostDistance.LOCAL, 32);
         poolingOptions.setMaxConnectionsPerHost(HostDistance.REMOTE, 32);
-        poolingOptions.setMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.REMOTE, 128);
-        poolingOptions.setMaxSimultaneousRequestsPerConnectionThreshold(HostDistance.LOCAL, 128);
+        poolingOptions.setMaxRequestsPerConnection(HostDistance.REMOTE, 128);
+        poolingOptions.setMaxRequestsPerConnection(HostDistance.LOCAL, 128);
 
         Cluster.Builder builder = Cluster.builder()
                 .withSocketOptions(socketOptions)
                 .withCompression(ProtocolOptions.Compression.LZ4)
-                .withLoadBalancingPolicy(new TokenAwarePolicy(new DCAwareRoundRobinPolicy()))
-//                .withLoadBalancingPolicy(new WhiteListPolicy(new DCAwareRoundRobinPolicy(), Collections.singletonList(new InetSocketAddress(parameters.getCassandraContactPoint(), 9042))))
                 .withPoolingOptions(poolingOptions)
                 .withProtocolVersion(ProtocolVersion.V2)
                 .withPort(9042);
 
-        builder.addContactPoint(parameters.getCassandraContactPoint());
+        if (parameters.getCassandraBlacklist().size() > 0) {
+            Set<InetAddress> blacklisted = new HashSet<>();
+            for (String host : parameters.getCassandraBlacklist()) {
+                blacklisted.add(InetAddress.getByName(host));
+            }
+            builder.withLoadBalancingPolicy(new HostFilterPolicy(new TokenAwarePolicy(new RoundRobinPolicy()), host -> !blacklisted.contains(host.getAddress())));
+
+        } else {
+            builder.withLoadBalancingPolicy(new TokenAwarePolicy(new RoundRobinPolicy()));
+        }
+
+
+
+            builder.addContactPoint(parameters.getCassandraContactPoint());
 
         Cluster cluster = builder.build();
         Metadata metadata = cluster.getMetadata();

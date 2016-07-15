@@ -9,6 +9,7 @@ import org.joda.time.format.DateTimeFormatter;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 
 /**
  * @author Andrei Ivanov
@@ -30,6 +31,7 @@ public class DistheneDumper {
         options.addOption("c", "cassandra", true, "Cassandra contact point");
         options.addOption("e", "elasticsearch", true, "Elasticsearch contact point");
         options.addOption("t", "threads", true, "number of threads");
+        options.addOption("cb", "cassandra-blacklist", true, "cassandra blacklist");
 
         CommandLineParser parser = new GnuParser();
 
@@ -40,7 +42,7 @@ public class DistheneDumper {
             String logLevel = commandLine.hasOption("ll") ? commandLine.getOptionValue("ll") : "INFO";
             configureLog(logLocation, logLevel);
 
-            DistheneDumperParameters parameters = new DistheneDumperParameters();
+            final DistheneDumperParameters parameters = new DistheneDumperParameters();
             if (!commandLine.hasOption("o")) {
                 logger.error("No output path specified");
                 System.exit(2);
@@ -97,6 +99,11 @@ public class DistheneDumper {
 
             parameters.setCassandraContactPoint(commandLine.getOptionValue("c"));
             parameters.setElasticSearchContactPoint(commandLine.getOptionValue("e"));
+
+            if (commandLine.hasOption("cb")) {
+                Arrays.asList(commandLine.getOptionValue("cb").split(",")).forEach(parameters::addToCassandraBlacklist);
+            }
+
 
             logger.info("Running with the following parameters: " + parameters);
             new Dumper(parameters).dump();
