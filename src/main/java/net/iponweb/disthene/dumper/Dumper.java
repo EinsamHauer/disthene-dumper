@@ -41,6 +41,9 @@ import java.util.zip.GZIPOutputStream;
  */
 public class Dumper {
     private static final String INDEX_NAME = "cyanite_paths";
+    private static final String TABLE_QUERY = "SELECT COUNT(1) FROM SYSTEM.SCHEMA_COLUMNFAMILIES WHERE KEYSPACE_NAME=? AND COLUMNFAMILY_NAME=?";
+    private static final String TENANT_TABLE_FORMAT = "metric_%s_%d";
+    private static final String TENANT_KEYSPACE = "metric";
 
     private static Logger logger = Logger.getLogger(Dumper.class);
 
@@ -49,13 +52,23 @@ public class Dumper {
     private TransportClient client;
     private Session session;
 
-    public Dumper(DistheneDumperParameters parameters) {
+    private PreparedStatement tableQueryStatement;
+    private boolean globalTableExists;
+
+    Dumper(DistheneDumperParameters parameters) {
         this.parameters = parameters;
     }
 
     public void dump() throws ExecutionException, InterruptedException, IOException {
         connectToES();
         connectToCassandra();
+
+        tableQueryStatement = session.prepare(TABLE_QUERY);
+
+        // check global table
+        globalTableExists = checkGlobalTable();
+
+        logger.info("Global table exists");
 
         // create directory
         File dayFolder = new File(parameters.getOutputLocation() + "/" + new DateTime(parameters.getStartTime() * 1000L, DateTimeZone.UTC).toString(DateTimeFormat.forPattern("yyyy-MM-dd")));
@@ -79,7 +92,17 @@ public class Dumper {
         client.close();
     }
 
-    private void dumpTenant(File folder, final String tenant) throws IOException, ExecutionException, InterruptedException {
+    private boolean checkGlobalTable() {
+        ResultSet resultSet = session.execute(tableQueryStatement.bind("metric", "metric"));
+        return resultSet.one().getLong(0) > 0;
+    }
+
+    private boolean checkTenantTable(String tenant) {
+        ResultSet resultSet = session.execute(tableQueryStatement.bind(TENANT_KEYSPACE, String.format(TENANT_TABLE_FORMAT, tenant.replaceAll("[^0-9a-zA-Z_]", "_"), 900)));
+        return resultSet.one().getLong(0) > 0;
+    }
+
+    private void dumpTenant(File folder, final String tenant) throws IOException {
         logger.info("Dumping tenant: " + tenant);
 
         FileOutputStream fos = new FileOutputStream(folder.getAbsolutePath() + "/" + tenant + ".txt.gz");
@@ -91,17 +114,39 @@ public class Dumper {
 
         logger.info("Got " + paths.size() + " paths");
 
-        final PreparedStatement longRollupStatement = session.prepare(
-                "select time, data from metric.metric where tenant = '" + tenant + "' and path = ? and rollup = 900 and period = 69120 and " +
-                        "time >= " + parameters.getStartTime() + " and time <= " + parameters.getEndTime() +
-                        " order by time asc"
-        );
+        boolean tenantTableExists = checkTenantTable(tenant);
+        logger.info(tenantTableExists ? "Tenant table exists" : "Tenant table doesn't exist");
+
+        List<PreparedStatement> statements = new ArrayList<>();
+
+        if (globalTableExists) {
+            statements.add(
+                    session.prepare(
+                            "select time, data from metric.metric where tenant = '" + tenant + "' and path = ? and rollup = 900 and period = 69120 and " +
+                                    "time >= " + parameters.getStartTime() + " and time <= " + parameters.getEndTime() +
+                                    " order by time asc"
+                    )
+            );
+        }
+
+        if (tenantTableExists) {
+            statements.add(
+                    session.prepare(
+                            String.format(
+                                    "select time, data from " + TENANT_KEYSPACE + "." + TENANT_TABLE_FORMAT + " where path = ? and " +
+                                            "time >= " + parameters.getStartTime() + " and time <= " + parameters.getEndTime() +
+                                            " order by time asc",
+                                    tenant.replaceAll("[^0-9a-zA-Z_]", "_"), 900
+                            )
+                    )
+            );
+        }
 
         ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(parameters.getThreads()));
         final AtomicInteger counter = new AtomicInteger(0);
 
         for (String path : paths) {
-            ListenableFuture<List<Metric>> future = executor.submit(new SinglePathCallable(session, longRollupStatement, path, tenant));
+            ListenableFuture<List<Metric>> future = executor.submit(new SinglePathCallable(session, statements, path, tenant));
             Futures.addCallback(future, new FutureCallback<List<Metric>>() {
                 @Override
                 public void onSuccess(List<Metric> result) {
@@ -150,7 +195,7 @@ public class Dumper {
 
         while (response.getHits().getHits().length > 0) {
             for (SearchHit hit : response.getHits()) {
-                paths.add(hit.field("path").<String>getValue());
+                paths.add(hit.field("path").getValue());
             }
 
             response = client.prepareSearchScroll(response.getScrollId())
@@ -232,12 +277,12 @@ public class Dumper {
     }
 
     private static class Metric {
-        public String path;
-        public Long time;
-        public Double data;
-        public String tenant;
+        String path;
+        Long time;
+        Double data;
+        String tenant;
 
-        public Metric(String path, Long time, Double data, String tenant) {
+        Metric(String path, Long time, Double data, String tenant) {
             this.path = path;
             this.time = time;
             this.data = data;
@@ -252,29 +297,40 @@ public class Dumper {
 
     private static class SinglePathCallable implements Callable<List<Metric>> {
         private Session session;
-        private PreparedStatement preparedStatement;
+        private List<PreparedStatement> statements;
         private String path;
         private String tenant;
 
-        public SinglePathCallable(Session session, PreparedStatement preparedStatement, String path, String tenant) {
+        SinglePathCallable(Session session, List<PreparedStatement> statements, String path, String tenant) {
             this.session = session;
-            this.preparedStatement = preparedStatement;
+            this.statements = statements;
             this.path = path;
             this.tenant = tenant;
         }
 
         @Override
-        public List<Metric> call() throws Exception {
+        public List<Metric> call() {
             List<Metric> metrics = new ArrayList<>();
-            Statement statement = preparedStatement.bind(path);
-//            statement.setFetchSize(1000);
-            ResultSet resultSet = session.execute(statement);
 
-            for(Row row : resultSet) {
-                metrics.add(new Metric(path, row.getLong("time"), ListUtils.average(row.getList("data", Double.class)), tenant));
+            for (PreparedStatement statement : statements) {
+                ResultSet resultSet = session.execute(statement.bind(path));
+
+                for(Row row : resultSet) {
+                    metrics.add(new Metric(
+                            path,
+                            row.getLong("time"),
+                            isSumMetric(path) ? ListUtils.sum(row.getList("data", Double.class)) : ListUtils.average(row.getList("data", Double.class)),
+                            tenant
+                    ));
+                }
+
             }
-
             return metrics;
+        }
+
+        private static boolean isSumMetric(String path) {
+            return path.startsWith("sum");
+
         }
     }
 }
