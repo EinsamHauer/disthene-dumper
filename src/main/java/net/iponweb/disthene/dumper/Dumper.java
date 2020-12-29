@@ -39,15 +39,16 @@ import java.util.zip.GZIPOutputStream;
 /**
  * @author Andrei Ivanov
  */
+@SuppressWarnings("UnstableApiUsage")
 public class Dumper {
     private static final String INDEX_NAME = "cyanite_paths";
     private static final String TABLE_QUERY = "SELECT COUNT(1) FROM SYSTEM.SCHEMA_COLUMNFAMILIES WHERE KEYSPACE_NAME=? AND COLUMNFAMILY_NAME=?";
     private static final String TENANT_TABLE_FORMAT = "metric_%s_%d";
     private static final String TENANT_KEYSPACE = "metric";
 
-    private static Logger logger = Logger.getLogger(Dumper.class);
+    private static final Logger logger = Logger.getLogger(Dumper.class);
 
-    private DistheneDumperParameters parameters;
+    private final DistheneDumperParameters parameters;
 
     private TransportClient client;
     private Session session;
@@ -153,9 +154,12 @@ public class Dumper {
                     for (Metric metric : result) {
                         pwMetrics.println(metric);
                     }
-                    int cc = counter.addAndGet(1);
+
+                    double cc = counter.addAndGet(1);
+
                     if (cc % 100000 == 0) {
-                        logger.info("Processed: " + cc * 100 / paths.size() + "%");
+                        logger.info("Processed: " + (int)((cc  / paths.size()) * 100) + "%");
+
                         pwMetrics.flush();
                     }
                 }
@@ -169,6 +173,7 @@ public class Dumper {
 
         executor.shutdown();
         try {
+            //noinspection ResultOfMethodCallIgnored
             executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             logger.error("Failed: ", e);
@@ -184,7 +189,7 @@ public class Dumper {
     private List<String> getTenantPaths(String tenant) {
         final List<String> paths = new ArrayList<>();
 
-        SearchResponse response = client.prepareSearch("cyanite_paths")
+        SearchResponse response = client.prepareSearch(INDEX_NAME)
                 .setScroll(new TimeValue(120000))
                 .setSize(100000)
                 .setQuery(QueryBuilders.filteredQuery(QueryBuilders.filteredQuery(
@@ -296,10 +301,10 @@ public class Dumper {
     }
 
     private static class SinglePathCallable implements Callable<List<Metric>> {
-        private Session session;
-        private List<PreparedStatement> statements;
-        private String path;
-        private String tenant;
+        private final Session session;
+        private final List<PreparedStatement> statements;
+        private final String path;
+        private final String tenant;
 
         SinglePathCallable(Session session, List<PreparedStatement> statements, String path, String tenant) {
             this.session = session;
