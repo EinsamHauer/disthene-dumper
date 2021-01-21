@@ -6,6 +6,7 @@ import com.datastax.driver.core.policies.HostFilterPolicy;
 import com.datastax.driver.core.policies.TokenAwarePolicy;
 import com.google.common.util.concurrent.*;
 import org.apache.log4j.Logger;
+import org.elasticsearch.action.count.CountResponse;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.client.transport.TransportClient;
@@ -29,10 +30,7 @@ import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.GZIPOutputStream;
 
@@ -103,17 +101,12 @@ public class Dumper {
         return resultSet.one().getLong(0) > 0;
     }
 
-    private void dumpTenant(File folder, final String tenant) throws IOException {
+    private void dumpTenant(File folder, final String tenant) throws IOException, InterruptedException {
         logger.info("Dumping tenant: " + tenant);
 
         FileOutputStream fos = new FileOutputStream(folder.getAbsolutePath() + "/" + tenant + ".txt.gz");
         GZIPOutputStream gzos = new GZIPOutputStream(fos);
         final PrintWriter pwMetrics = new PrintWriter(gzos);
-
-        logger.info("Getting paths");
-        final List<String> paths = getTenantPaths(tenant);
-
-        logger.info("Got " + paths.size() + " paths");
 
         boolean tenantTableExists = checkTenantTable(tenant);
         logger.info(tenantTableExists ? "Tenant table exists" : "Tenant table doesn't exist");
@@ -146,32 +139,77 @@ public class Dumper {
         ListeningExecutorService executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(parameters.getThreads()));
         final AtomicInteger counter = new AtomicInteger(0);
 
-        for (String path : paths) {
-            ListenableFuture<List<Metric>> future = executor.submit(new SinglePathCallable(session, statements, path, tenant));
-            Futures.addCallback(future, new FutureCallback<List<Metric>>() {
-                @Override
-                public void onSuccess(List<Metric> result) {
-                    for (Metric metric : result) {
-                        pwMetrics.println(metric);
+        CountResponse countResponse = client.prepareCount("cyanite_paths")
+                .setQuery(
+                        QueryBuilders.boolQuery()
+                                .must(QueryBuilders.termQuery("tenant", tenant))
+                                .must(QueryBuilders.termQuery("leaf", true))
+                )
+                .execute()
+                .actionGet();
+
+        long total = countResponse.getCount();
+        logger.info("Got " + total + " paths");
+
+        SearchResponse response = client.prepareSearch("cyanite_paths")
+                .setSearchType(SearchType.SCAN)
+                .setScroll(new TimeValue(4, TimeUnit.HOURS))
+                .setSize(10_000)
+                .setQuery(
+                        QueryBuilders.boolQuery()
+                                .must(QueryBuilders.termQuery("tenant", tenant))
+                                .must(QueryBuilders.termQuery("leaf", true))
+                )
+                .setSearchType(SearchType.SCAN)
+                .addField("path")
+                .execute().actionGet();
+
+        response = client.prepareSearchScroll(response.getScrollId())
+                .setScroll(new TimeValue(4, TimeUnit.HOURS))
+                .execute().actionGet();
+
+        Semaphore semaphore = new Semaphore(parameters.getThreads() * 2);
+
+        while (response.getHits().getHits().length > 0) {
+            for (SearchHit hit : response.getHits()) {
+                String path = hit.field("path").getValue();
+
+                semaphore.acquire();
+                ListenableFuture<List<Metric>> future = executor.submit(new SinglePathCallable(session, statements, path, tenant));
+                Futures.addCallback(future, new FutureCallback<List<Metric>>() {
+                    @Override
+                    public void onSuccess(List<Metric> result) {
+                        for (Metric metric : result) {
+                            pwMetrics.println(metric);
+                        }
+
+                        double cc = counter.addAndGet(1);
+
+                        if (cc % 100000 == 0) {
+                            logger.info("Processed: " + (int)((cc  / total) * 100) + "%");
+
+                            pwMetrics.flush();
+                        }
+
+                        semaphore.release();
                     }
 
-                    double cc = counter.addAndGet(1);
-
-                    if (cc % 100000 == 0) {
-                        logger.info("Processed: " + (int)((cc  / paths.size()) * 100) + "%");
-
-                        pwMetrics.flush();
+                    @Override
+                    public void onFailure(Throwable t) {
+                        logger.error("Unexpected error:", t);
+                        semaphore.release();
                     }
-                }
+                });
 
-                @Override
-                public void onFailure(Throwable t) {
-                    logger.error("Unexpected error:", t);
-                }
-            });
+            }
+
+            response = client.prepareSearchScroll(response.getScrollId())
+                    .setScroll(new TimeValue(4, TimeUnit.HOURS))
+                    .execute().actionGet();
         }
 
         executor.shutdown();
+
         try {
             //noinspection ResultOfMethodCallIgnored
             executor.awaitTermination(Long.MAX_VALUE, TimeUnit.SECONDS);
@@ -184,32 +222,6 @@ public class Dumper {
         gzos.close();
         fos.close();
         logger.info("Finished dumping tenant: " + tenant);
-    }
-
-    private List<String> getTenantPaths(String tenant) {
-        final List<String> paths = new ArrayList<>();
-
-        SearchResponse response = client.prepareSearch(INDEX_NAME)
-                .setScroll(new TimeValue(120000))
-                .setSize(100000)
-                .setQuery(QueryBuilders.filteredQuery(QueryBuilders.filteredQuery(
-                        QueryBuilders.regexpQuery("path", ".*"),
-                        FilterBuilders.termFilter("tenant", tenant)), FilterBuilders.termFilter("leaf", true)))
-                .addField("path")
-                .execute().actionGet();
-
-        while (response.getHits().getHits().length > 0) {
-            for (SearchHit hit : response.getHits()) {
-                paths.add(hit.field("path").getValue());
-            }
-
-            response = client.prepareSearchScroll(response.getScrollId())
-                    .setScroll(new TimeValue(120000))
-                    .execute().actionGet();
-        }
-
-
-        return paths;
     }
 
     private List<String> getTenants() throws ExecutionException, InterruptedException {
@@ -242,8 +254,8 @@ public class Dumper {
         socketOptions.setReceiveBufferSize(8388608);
         socketOptions.setSendBufferSize(1048576);
         socketOptions.setTcpNoDelay(false);
-        socketOptions.setReadTimeoutMillis(1000000);
-        socketOptions.setReadTimeoutMillis(1000000);
+        socketOptions.setReadTimeoutMillis(1_000_000);
+        socketOptions.setReadTimeoutMillis(1_000_000);
 
         PoolingOptions poolingOptions = new PoolingOptions();
         poolingOptions.setMaxConnectionsPerHost(HostDistance.LOCAL, 32);
