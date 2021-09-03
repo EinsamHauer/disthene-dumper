@@ -123,6 +123,7 @@ public class Dumper {
 
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder()
                 .fetchSource("path", null)
+                .size(10_000)
                 .query(
                         QueryBuilders.boolQuery()
                                 .must(QueryBuilders.termQuery("tenant", tenant))
