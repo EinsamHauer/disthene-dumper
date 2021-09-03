@@ -1,7 +1,12 @@
 package net.iponweb.disthene.dumper;
 
 import org.apache.commons.cli.*;
-import org.apache.log4j.*;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.core.config.Configurator;
+import org.apache.logging.log4j.core.config.builder.api.*;
+import org.apache.logging.log4j.core.config.builder.impl.BuiltConfiguration;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.format.DateTimeFormat;
@@ -31,9 +36,8 @@ public class DistheneDumper {
         options.addOption("c", "cassandra", true, "Cassandra contact point");
         options.addOption("e", "elasticsearch", true, "Elasticsearch contact point");
         options.addOption("t", "threads", true, "number of threads");
-        options.addOption("cb", "cassandra-blacklist", true, "cassandra blacklist");
 
-        CommandLineParser parser = new GnuParser();
+        CommandLineParser parser = new DefaultParser();
 
         try {
             CommandLine commandLine = parser.parse(options, args);
@@ -100,11 +104,6 @@ public class DistheneDumper {
             parameters.setCassandraContactPoint(commandLine.getOptionValue("c"));
             parameters.setElasticSearchContactPoint(commandLine.getOptionValue("e"));
 
-            if (commandLine.hasOption("cb")) {
-                Arrays.asList(commandLine.getOptionValue("cb").split(",")).forEach(parameters::addToCassandraBlacklist);
-            }
-
-
             logger.info("Running with the following parameters: " + parameters);
             new Dumper(parameters).dump();
 
@@ -124,25 +123,39 @@ public class DistheneDumper {
     private static void configureLog(String location, String level) {
         Level logLevel = Level.toLevel(level, Level.INFO);
 
-        Logger rootLogger = Logger.getRootLogger();
-        rootLogger.setLevel(logLevel);
+        ConfigurationBuilder<BuiltConfiguration> builder = ConfigurationBuilderFactory.newConfigurationBuilder();
 
-        PatternLayout layout = new PatternLayout("%p %d{dd.MM.yyyy HH:mm:ss,SSS} [%t] %c %x - %m%n");
-        rootLogger.addAppender(new ConsoleAppender(layout));
+        RootLoggerComponentBuilder rootLogger = builder.newRootLogger(logLevel);
 
-        logger = Logger.getLogger(DistheneDumper.class);
+        // console
+        LayoutComponentBuilder layout = builder.newLayout("PatternLayout")
+                .addAttribute("pattern", "%p %d{dd.MM.yyyy HH:mm:ss,SSS} [%t] %c %x - %m%n");
 
+        AppenderComponentBuilder console = builder.newAppender("stdout", "Console").add(layout);
+        builder.add(console);
+        rootLogger.add(builder.newAppenderRef("stdout"));
+
+        // file
         if (location != null) {
-            try {
-                RollingFileAppender fileAppender = new RollingFileAppender(layout, location);
-                rootLogger.addAppender(fileAppender);
-            } catch (IOException e) {
-                logger.error("Failed to add file appender: ", e);
-            }
+            AppenderComponentBuilder rollingFile = builder.newAppender("rolling", "RollingFile");
+            rollingFile.addAttribute("fileName", location);
+            rollingFile.addAttribute("filePattern", location + "-%d{MM-dd-yy}.log.gz");
+
+            @SuppressWarnings("rawtypes")
+            ComponentBuilder triggeringPolicies = builder.newComponent("Policies")
+                    .addComponent(builder.newComponent("TimeBasedTriggeringPolicy")
+                            .addAttribute("interval", "1"));
+            rollingFile.addComponent(triggeringPolicies);
+
+            builder.add(rollingFile);
+
+            rootLogger.add(builder.newAppenderRef("rolling"));
         }
 
+        builder.add(rootLogger);
 
+        Configurator.initialize(builder.build());
+
+        logger = LogManager.getLogger(DistheneDumper.class);
     }
-
-
 }
