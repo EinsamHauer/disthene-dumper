@@ -106,7 +106,6 @@ public class Dumper {
                         tenant.replaceAll("[^0-9a-zA-Z_]", "_"), 900
                 ));
 
-
         ExecutorService executor = Executors.newFixedThreadPool(parameters.getThreads());
         final AtomicInteger counter = new AtomicInteger(0);
 
@@ -114,7 +113,6 @@ public class Dumper {
                 .query(QueryBuilders.boolQuery()
                         .must(QueryBuilders.termQuery("tenant", tenant))
                         .must(QueryBuilders.termQuery("leaf", true)));
-
 
         CountResponse countResponse = client.count(countRequest, RequestOptions.DEFAULT);
 
@@ -134,7 +132,6 @@ public class Dumper {
         SearchRequest request = new SearchRequest(INDEX_NAME)
                 .source(sourceBuilder)
                 .scroll(scroll);
-
 
         SearchResponse response = client.search(request, RequestOptions.DEFAULT);
         String scrollId = response.getScrollId();
