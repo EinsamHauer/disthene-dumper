@@ -135,7 +135,7 @@ public class DistheneDumper {
 
         // file
         if (location != null) {
-            AppenderComponentBuilder rollingFile = builder.newAppender("rolling", "RollingFile");
+            AppenderComponentBuilder rollingFile = builder.newAppender("rolling", "RollingFile").add(layout);
             rollingFile.addAttribute("fileName", location);
             rollingFile.addAttribute("filePattern", location + "-%d{MM-dd-yy}.log.gz");
 
