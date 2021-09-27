@@ -9,6 +9,7 @@ import com.datastax.oss.driver.api.core.cql.Row;
 import com.datastax.oss.driver.api.core.metadata.Metadata;
 import com.datastax.oss.driver.api.core.metadata.Node;
 import com.datastax.oss.driver.internal.core.loadbalancing.DcInferringLoadBalancingPolicy;
+import com.datastax.oss.driver.internal.core.session.throttling.ConcurrencyLimitingRequestThrottler;
 import org.apache.http.HttpHost;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -53,6 +54,9 @@ public class Dumper {
     private static final String INDEX_NAME = "disthene";
     private static final String TABLE_FORMAT = "metric_%s_%d";
     private static final String KEYSPACE = "metric";
+
+    private static final int MAX_QUEUE_SIZE = 1024*1024;
+    private static final int MAX_CONCURRENT_REQUESTS = 1024;
 
     private static final Logger logger = LogManager.getLogger(Dumper.class);
 
@@ -228,6 +232,9 @@ public class Dumper {
                         .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofMillis(1_000_000))
                         .withString(DefaultDriverOption.REQUEST_CONSISTENCY, "ONE")
                         .withClass(DefaultDriverOption.LOAD_BALANCING_POLICY_CLASS, DcInferringLoadBalancingPolicy.class)
+                        .withClass(DefaultDriverOption.REQUEST_THROTTLER_CLASS, ConcurrencyLimitingRequestThrottler.class)
+                        .withInt(DefaultDriverOption.REQUEST_THROTTLER_MAX_CONCURRENT_REQUESTS, MAX_CONCURRENT_REQUESTS)
+                        .withInt(DefaultDriverOption.REQUEST_THROTTLER_MAX_QUEUE_SIZE, MAX_QUEUE_SIZE)
                         .build();
 
         session = CqlSession.builder().withConfigLoader(loader).build();
