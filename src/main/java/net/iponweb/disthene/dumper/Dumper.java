@@ -115,7 +115,7 @@ public class Dumper {
 
         CountRequest countRequest = new CountRequest(INDEX_NAME)
                 .query(QueryBuilders.boolQuery()
-                        .must(QueryBuilders.termQuery("tenant", tenant))
+                        .must(QueryBuilders.termQuery("tenant.keyword", tenant))
                         .must(QueryBuilders.termQuery("leaf", true)));
 
         CountResponse countResponse = client.count(countRequest, RequestOptions.DEFAULT);
@@ -130,7 +130,7 @@ public class Dumper {
                 .size(10_000)
                 .query(
                         QueryBuilders.boolQuery()
-                                .must(QueryBuilders.termQuery("tenant", tenant))
+                                .must(QueryBuilders.termQuery("tenant.keyword", tenant))
                                 .must(QueryBuilders.termQuery("leaf", true))
                 );
 
